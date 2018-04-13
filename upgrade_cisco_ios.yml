@@ -1,0 +1,58 @@
+# This playbook is for:
+# Upgrading from Cisco IOS XE 3.xE to Cisco IOS XE Denali 16.1.1, 16.1.2, or 16.1.3 in Install Mode
+# https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst3650/software/release/16-1/release_notes/ol-16-1-3650.html
+# Author: Adam Wilkins - 3/30/2018
+
+- name: Upgrade a Cisco IOS Device
+  hosts: ios_switch_3650
+  tasks:
+    - name: Gathering Facts
+      ios_facts:
+        gather_subset: hardware
+        provider: "{{ creds_ssh }}"
+      tags: always
+
+    - name: Disable file task prompting
+      ios_config:
+        provider: "{{ creds_ssh }}"
+        lines: file prompt quiet
+      when: ansible_net_version != standard_version
+      tags: copy   
+
+   - name: Copying image from ftp server to device flash
+      ios_command:
+        provider: "{{ creds_ssh_ftp }}"
+        commands: "copy ftp://{{ username }}:{{ password }}@X.X.X.X/filepath/{{ image }} flash:"
+      when: ansible_net_version != standard_version
+      tags: copy
+
+    - name: Get MD5 Hash from uploaded file
+      ios_command:
+        provider: "{{ creds_ssh_ftp }}"
+        commands: "verify /md5 {{ image }}"
+      register: md5_check_output
+      when: ansible_net_version != standard_version
+      tags: calc_hash
+
+    - name: set_fact
+      set_fact:
+        md5_calc_checksum: "{{ md5_check_output.stdout_lines[0][1] }}"
+      when: ansible_net_version != standard_version
+      tags: calc_hash
+
+    - name: Verify MD5 hash is correct
+      debug:
+        msg: Verify MD5 has is correct
+      failed_when: image_md5 not in md5_calc_checksum
+      when: ansible_net_version != standard_version
+      tags: calc_hash
+
+    - name: Install software to flash of switch(es)
+      ios_command:
+        provider: "{{ creds_ssh_10min }}"
+        commands:
+          - command: 'software install file flash:{{ image }} new force'
+            prompt: '\[yes\/no\]:'
+            answer: 'no'
+      when: ansible_net_version != standard_version
+      tags: install_software
